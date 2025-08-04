@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProdutosModule } from './modules/produtos/produtos.module';
 import { CestasModule } from './modules/cestas/cestas.module';
+import { KafkaModule } from './modules/kafka/kafka.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { CestasModule } from './modules/cestas/cestas.module';
     }),
     ProdutosModule,
     CestasModule,
+    KafkaModule,
   ],
 })
 export class AppModule {}
