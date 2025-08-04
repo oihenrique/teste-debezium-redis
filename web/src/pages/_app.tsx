@@ -1,7 +1,7 @@
 import "@/styles/globals.css";
 import { PrimeReactProvider } from "primereact/api";
 import type { AppProps } from "next/app";
-import "primereact/resources/themes/mira/theme.css"; // tema
+import "primereact/resources/themes/viva-light/theme.css"; // tema
 import "primereact/resources/primereact.min.css"; // estilos principais
 import "primeicons/primeicons.css"; // ícones
 import "../styles/globals.css";
