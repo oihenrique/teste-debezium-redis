@@ -12,8 +12,8 @@ const consumer = kafka.consumer({ groupId: 'grupo-cestas' });
 
 // conecta ao Redis
 const redis = new Redis({
-  host: 'localhost', // ou 'redis' se for de dentro de container
-  port: 6379,
+  host: process.env.REDIS_HOST,
+  port: Number(process.env.REDIS_PORT),
 });
 
 async function start() {

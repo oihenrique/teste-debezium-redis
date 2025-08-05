@@ -17,3 +17,9 @@ services:
       -c max_wal_senders=10
       -c max_replication_slots=10
       -c max_connections=100
+    networks:
+      - loja-network
+
+networks:
+  loja-network:
+    external: true

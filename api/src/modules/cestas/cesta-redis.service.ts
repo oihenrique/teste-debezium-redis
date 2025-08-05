@@ -7,7 +7,10 @@ export class CestaRedisService implements OnModuleInit {
   private subscriber: Redis;
 
   constructor(private readonly gateway: CestasGateway) {
-    this.subscriber = new Redis(); // conecta no localhost:6379
+    this.subscriber = new Redis({
+      host: process.env.REDIS_HOST ?? 'redis',
+      port: Number(process.env.REDIS_PORT ?? '6379'),
+    });
   }
 
   async onModuleInit() {

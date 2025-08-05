@@ -1,0 +1,43 @@
+services:
+  api:
+    container_name: nest-api
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "3020:3020" # externo:interno
+    volumes:
+      - ./api:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BROKER=kafka:9092
+    env_file:
+      - ./api/.env
+    networks:
+      - loja-network
+
+  web:
+    container_name: next-web
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3020
+    env_file:
+      - ./web/.env
+    networks:
+      - loja-network
+
+networks:
+  loja-network:
+    external: true
