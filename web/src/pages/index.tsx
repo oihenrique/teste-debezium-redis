@@ -16,13 +16,40 @@ export default function TesteCestasPage() {
 
     socket.on("connect", () => {
       console.log("🔌 Conectado ao WebSocket");
+      socket.emit("join", "R02:CX-01"); // <- sala correta!
     });
 
-    socket.on("cestaAtualizada", (novaCesta: Cesta) => {
-      console.log("📦 Cesta recebida:", novaCesta);
+    socket.on("eventoCaixa", (evento: any) => {
+      const after = evento.after;
+      if (!after) return;
+
+      // Converta para o formato que o React espera:
+      const novaCesta: Cesta = {
+        id: after.id,
+        caixaId: after.caixa_id,
+        status: after.status,
+        criadoEm: String(after.criado_em), // ou use new Date(...) se for timestamp
+      };
 
       setCestas((prev) => {
-        // remove duplicatas pelo ID
+        const atualizadas = prev.filter((c) => c.id !== novaCesta.id);
+        return [...atualizadas, novaCesta];
+      });
+    });
+
+    socket.on("eventoCaixa", (evento: any) => {
+      const after = evento.after;
+      if (!after) return;
+
+      // Converta para o formato que o React espera:
+      const novaCesta: Cesta = {
+        id: after.id,
+        caixaId: after.caixa_id,
+        status: after.status,
+        criadoEm: new Date(after.criado_em).toLocaleString("pt-BR"),
+      };
+
+      setCestas((prev) => {
         const atualizadas = prev.filter((c) => c.id !== novaCesta.id);
         return [...atualizadas, novaCesta];
       });
@@ -36,7 +63,6 @@ export default function TesteCestasPage() {
   return (
     <main className="p-6">
       <h1 className="text-2xl font-bold mb-4">🧺 Cestas em tempo real</h1>
-
       <div className="space-y-4">
         {cestas.map((cesta) => (
           <div
