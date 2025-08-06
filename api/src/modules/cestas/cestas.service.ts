@@ -7,6 +7,7 @@ import { Cesta } from './entities/cesta.entity';
 import { CestaProduto } from './entities/cesta-produto.entity';
 import { UpdateCestaProdutoDto } from './types/update-cesta-produto.dto';
 import { CreateCestaProdutoDto } from './types/create-cesta-produto.dto';
+import { Produto } from '../produtos/produto.entity';
 
 @Injectable()
 export class CestasService {
@@ -15,6 +16,8 @@ export class CestasService {
     private readonly cestaRepo: Repository<Cesta>,
     @InjectRepository(CestaProduto)
     private readonly cestaProdutoRepo: Repository<CestaProduto>,
+    @InjectRepository(Produto)
+    private readonly produtoRepo: Repository<Produto>,
   ) {}
 
   async criar(data: CreateCestaDto): Promise<Cesta> {
