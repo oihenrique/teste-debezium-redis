@@ -6,58 +6,64 @@ import { CestasService } from '../cestas/cestas.service';
 
 @Controller()
 export class DebeziumListenerService implements OnModuleInit, OnModuleDestroy {
-  private redisPub: Redis;
-  private redisSub: Redis;
+  private redisStream: Redis;
+  private readonly esquemaPadrao = 'public';
 
   constructor(
     private wsGateway: KafkaGateway,
     private readonly cestasService: CestasService,
   ) {}
 
-  onModuleInit() {
-    this.redisPub = new Redis({
+  async onModuleInit() {
+    this.redisStream = new Redis({
       host: process.env.REDIS_HOST || 'redis',
       port: Number(process.env.REDIS_PORT) || 6379,
     });
 
-    this.redisSub = new Redis({
-      host: process.env.REDIS_HOST || 'redis',
-      port: Number(process.env.REDIS_PORT) || 6379,
-    });
+    // Exemplo de canal; para múltiplos canais, crie groups dinamicamente
+    const exemploCanal = 'R02:CX-01';
+    const streamKey = `stream:${exemploCanal}`;
+    const groupName = 'cestas-consumidores';
 
-    this.redisSub.psubscribe('R*:CX-*', (err) => {
-      if (err) console.error('Erro ao subscrever Redis:', err);
-      else console.log('Subscrito nos canais de caixas');
-    });
+    // Cria o consumer group, se não existir
+    try {
+      await this.redisStream.xgroup(
+        'CREATE',
+        streamKey,
+        groupName,
+        '$', // consome só novas mensagens
+        'MKSTREAM',
+      );
+      console.log(`Grupo criado em ${streamKey}/${groupName}`);
+    } catch (err: any) {
+      if (err.message.includes('BUSYGROUP')) {
+        console.log(`Grupo já existe: ${streamKey}/${groupName}`);
+      } else {
+        console.error('Erro criando consumer group:', err);
+        throw err;
+      }
+    }
 
-    this.redisSub.on('pmessage', (pattern, channel, message) => {
-      const evento = JSON.parse(message as string);
-      this.wsGateway.emitirParaSala(channel as string, evento);
-      console.log(`Repassado do Redis para sala ${channel} via socket!`);
-    });
+    // Inicia o loop de consumo
+    void this.startStreamConsumer(exemploCanal, groupName);
   }
 
   async onModuleDestroy() {
-    if (this.redisPub) await this.redisPub.quit();
-    if (this.redisSub) await this.redisSub.quit();
+    if (this.redisStream) await this.redisStream.quit();
   }
 
   @EventPattern('dbserver1.public.cestas')
-  async handleDebeziumCestasEvent(@Payload() data: any) {
-    await this.publicarEventoDebezium(data, 'cestas');
+  async handleCestasEvent(@Payload() data: any) {
+    await this.publicarNoStream(data, 'cestas');
   }
 
   @EventPattern('dbserver1.public.cesta_produtos')
-  async handleDebeziumCestaProdutosEvent(@Payload() data: any) {
-    await this.publicarEventoDebezium(data, 'cesta_produtos');
+  async handleProdutosEvent(@Payload() data: any) {
+    await this.publicarNoStream(data, 'cesta_produtos');
   }
 
-  private async publicarEventoDebezium(
-    data: any,
-    nomeTabelaPadrao = 'desconhecida',
-  ) {
-    if (!data || !data.payload) return;
-
+  private async publicarNoStream(data: any, tabela: string) {
+    if (!data?.payload) return;
     const { before, after, op, source, ts_ms } = data.payload;
     const operacao =
       op === 'c'
@@ -71,55 +77,104 @@ export class DebeziumListenerService implements OnModuleInit, OnModuleDestroy {
     const loja = 'R02';
     const caixa = before?.caixa_id || after?.caixa_id || '01';
     const canal = `${loja}:CX-${String(caixa).padStart(2, '0')}`;
+    const streamKey = `stream:${canal}`;
 
+    // Enriquecer payload se necessário
     let afterEnriquecido = after;
-    if (nomeTabelaPadrao === 'cesta_produtos' && after) {
-      // Buscar dados do produto
+    if (tabela === 'cesta_produtos' && after) {
       try {
-        const produtoId = after.produto_id;
         const produto = await this.cestasService['produtoRepo'].findOneBy({
-          id: produtoId,
+          id: after.produto_id,
         });
-        let preco: number | null = null;
-
-        // Decodifica se vier em base64, senão pega do banco
+        let preco = produto?.preco || null;
         if (after.preco_unitario) {
           try {
             preco = Buffer.from(after.preco_unitario, 'base64').readFloatLE(0);
           } catch {
-            preco = Number(after.preco_unitario) || produto?.preco || null;
+            preco = Number(after.preco_unitario) || preco;
           }
-        } else {
-          preco = produto?.preco || null;
         }
-
         afterEnriquecido = {
           ...after,
-          nome_produto: produto?.nome ?? null,
+          nome_produto: produto?.nome,
           preco_unitario: preco,
         };
-      } catch (err) {
-        console.error('Erro buscando dados do produto:', err);
+      } catch (e) {
+        console.error('Erro enriquecendo produto:', e);
       }
     }
 
     const eventoJson = {
       evento: operacao,
-      tabela: source?.table || nomeTabelaPadrao,
+      tabela,
       dataEvento: ts_ms,
       before: before || null,
       after: afterEnriquecido || null,
-      origem: {
-        db: source?.db || null,
-        schema: source?.schema || null,
-        txId: source?.txId || null,
-      },
+      origem: { db: source.db, schema: source.schema, txId: source.txId },
     };
 
-    await this.redisPub.publish(canal, JSON.stringify(eventoJson));
-    console.log(
-      `Publicado no canal ${canal}:`,
-      JSON.stringify(eventoJson, null, 2),
+    // XADD no stream
+    const id = await this.redisStream.xadd(
+      streamKey,
+      '*',
+      'data',
+      JSON.stringify(eventoJson),
     );
+    console.log(`[STREAM-DEBUG] XADD ${streamKey} ID=${id}`);
+  }
+
+  private async startStreamConsumer(canal: string, group: string) {
+    const streamKey = `stream:${canal}`;
+    const consumer = `consumer-${process.pid}`;
+
+    // FASE 1: histórico (ID “0”)
+    await this.readGroupOnce(canal, streamKey, group, consumer, '0');
+
+    // FASE 2: ao vivo (ID “>”)
+    while (true) {
+      await this.readGroupOnce(canal, streamKey, group, consumer, '>');
+    }
+  }
+
+  // lê um batch do stream, dado o ID (“0” para backlog ou “>” para new)
+  private async readGroupOnce(
+    canal: string,
+    streamKey: string,
+    group: string,
+    consumer: string,
+    id: '0' | '>',
+  ) {
+    try {
+      // monta dinamicamente o array de args
+      const args: (string | number)[] = [
+        'GROUP',
+        group,
+        consumer,
+        'COUNT',
+        100,
+      ];
+      if (id === '>') {
+        args.push('BLOCK', 5000);
+      }
+      args.push('STREAMS', streamKey, id);
+
+      const entries = await this.redisStream.xreadgroup(...args);
+      if (!entries) return;
+
+      for (const [, messages] of entries as [string, [string, string[]][]][]) {
+        for (const [msgId, fields] of messages) {
+          const idx = fields.indexOf('data');
+          const payload = JSON.parse(fields[idx + 1]);
+          // agora temos acesso ao canal
+          this.wsGateway.emitirParaSala(canal, payload);
+          await this.redisStream.xack(streamKey, group, msgId);
+        }
+      }
+    } catch (err) {
+      console.error(
+        `Erro lendo ${id === '0' ? 'backlog' : 'stream'} em ${streamKey}:`,
+        err,
+      );
+    }
   }
 }

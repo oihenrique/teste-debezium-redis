@@ -21,57 +21,51 @@ export default function TesteCestasPage() {
   const [produtosCesta, setProdutosCesta] = useState<ProdutoCesta[]>([]);
 
   useEffect(() => {
-    const socket = io("http://localhost:3020"); // ajuste se o backend estiver em outra porta
+    const socket = io("http://localhost:3020");
 
     socket.on("connect", () => {
       console.log("🔌 Conectado ao WebSocket");
-      socket.emit("join", "R02:CX-01"); // <- sala correta!
+      socket.emit("join", "R02:CX-01");
     });
 
     socket.on("eventoCaixa", (evento: any) => {
-      if (evento.tabela === "cesta_produtos" && evento.evento === "DELETE") {
-        const before = evento.before;
-        if (!before) return;
-        setProdutosCesta((prev) => prev.filter((p) => p.id !== before.id));
+      // 1) Produtos na cesta
+      if (evento.tabela === "cesta_produtos") {
+        if (evento.evento === "DELETE" && evento.before) {
+          setProdutosCesta((prev) =>
+            prev.filter((p) => p.id !== evento.before.id)
+          );
+        } else if (evento.evento === "CREATE" || evento.evento === "UPDATE") {
+          const after = evento.after!;
+          const novo: ProdutoCesta = {
+            id: after.id,
+            cestaId: after.cesta_id,
+            produtoId: after.nome_produto,
+            quantidade: after.quantidade,
+            precoUnitario: after.preco_unitario,
+          };
+          setProdutosCesta((prev) => {
+            const sem = prev.filter((p) => p.id !== novo.id);
+            return [...sem, novo];
+          });
+        }
+        return; // não processa mais abaixo
       }
-      // Adiciona/atualiza produto só em CREATE ou UPDATE
-      if (evento.tabela !== "cesta_produtos") return;
-      if (evento.evento !== "CREATE" && evento.evento !== "UPDATE") return;
 
-      const after = evento.after;
-      if (!after) return;
-
-      const novoProduto: ProdutoCesta = {
-        id: after.id,
-        cestaId: after.cesta_id,
-        produtoId: after.nome_produto,
-        quantidade: after.quantidade,
-        precoUnitario: after.preco_unitario,
-      };
-
-      setProdutosCesta((prev) => {
-        // Atualiza se já existir, senão adiciona
-        const semDuplicatas = prev.filter((p) => p.id !== novoProduto.id);
-        return [...semDuplicatas, novoProduto];
-      });
-    });
-
-    socket.on("eventoCaixa", (evento: any) => {
-      const after = evento.after;
-      if (!after) return;
-
-      // Converta para o formato que o React espera:
-      const novaCesta: Cesta = {
-        id: after.id,
-        caixaId: after.caixa_id,
-        status: after.status,
-        criadoEm: new Date(after.criado_em).toLocaleString("pt-BR"),
-      };
-
-      setCestas((prev) => {
-        const atualizadas = prev.filter((c) => c.id !== novaCesta.id);
-        return [...atualizadas, novaCesta];
-      });
+      // 2) Cestas
+      if (evento.tabela === "cestas") {
+        const after = evento.after!;
+        const nova: Cesta = {
+          id: after.id,
+          caixaId: after.caixa_id,
+          status: after.status,
+          criadoEm: new Date(after.criado_em).toLocaleString("pt-BR"),
+        };
+        setCestas((prev) => {
+          const sem = prev.filter((c) => c.id !== nova.id);
+          return [...sem, nova];
+        });
+      }
     });
 
     return () => {
